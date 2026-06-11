@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Integration Calculator</title>
+    <style>
+        /* 纯原生CSS美化，替代Tailwind，确保无需网络加载 */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #f8fafc; color: #334155; min-height: 100-vh; display: flex; flex-col: column; justify-content: space-between; padding: 20px; }
+        .container { max-width: 1200px; width: 100%; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 20px; }
+        @media (min-width: 768px) { .container { grid-template-columns: 1fr 2fr; } }
+        .card { background: white; padding: 24px; border-radius: 16px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        h1 { font-size: 1.5rem; margin-bottom: 20px; color: #0f172a; display: flex; align-items: center; gap: 8px; }
+        .accent { color: #2563eb; font-size: 1.8rem; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 6px; color: #475569; }
+        input { width: 100%; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 1rem; outline: none; transition: all 0.2s; }
+        input:focus { border-color: #2563eb; background: white; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        button { w-width: 100%; width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 10px; font-size: 1rem; font-weight: 500; cursor: pointer; margin-top: 10px; transition: background 0.2s; }
+        button:hover { background: #1d4ed8; }
+        .error { color: #dc2626; background: #fef2f2; border: 1px solid #fee2e2; padding: 10px; border-radius: 10px; font-size: 0.85rem; margin-top: 10px; display: none; }
+        .result-box { text-align: center; margin-top: 20px; padding: 20px; background: #f0f9ff; border-radius: 12px; border: 1px dashed #bae6fd; }
+        .result-val { font-size: 2rem; font-weight: 700; color: #0369a1; margin-top: 5px; }
+        .graph-container { display: flex; flex-direction: column; height: 100%; min-height: 400px; }
+        canvas { width: 100%; flex-grow: 1; background: white; border-radius: 12px; }
+        .presets { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        .preset-btn { background: #e2e8f0; color: #475569; padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; width: auto; margin: 0; cursor: pointer; }
+        .preset-btn:hover { background: #cbd5e1; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="flex-col" style="display: flex; flex-direction: column; gap: 20px;">
+            <div class="card">
+                <h1><span class="accent">∫</span> 积分可视化计算器</h1>
+                
+                <div class="presets">
+                    <span style="font-size: 0.75rem; align-self: center; color: #94a3b8;">预设:</span>
+                    <div class="preset-btn" onclick="loadPreset('x * x - 2 * x + 2', 0, 3)">抛物线</div>
+                    <div class="preset-btn" onclick="loadPreset('Math.sin(x)', 0, 3.1416)">正弦波</div>
+                    <div class="preset-btn" onclick="loadPreset('Math.exp(-x * x)', -2, 2)">高斯曲线</div>
+                </div>
+
+                <div class="form-group">
+                    <label>函数表达式 (支持标准 JS 语法)</label>
+                    <input id="funcInput" type="text" value="x * x - 2 * x + 2">
+                    <small style="font-size: 0.75rem; color: #94a3b8; display: block; margin-top: 4px;">提示：请写明乘号，如 2*x 而非 2x</small>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>积分下限 (a)</label>
+                        <input id="paramA" type="number" value="0" step="any">
+                    </div>
+                    <div class="form-group">
+                        <label>积分上限 (b)</label>
+                        <input id="paramB" type="number" value="3" step="any">
+                    </div>
+                </div>
+
+                <div id="errBanner" class="error"></div>
+                <button onclick="calculateAndPlot()">生成图像并计算</button>
+            </div>
+
+            <div class="card result-box">
+                <div style="font-size: 0.85rem; color: #64748b; font-weight: 600; uppercase">定积分计算结果</div>
+                <div id="resTitle" style="font-style: italic; margin-top: 5px; color: #334155;"></div>
+                <div id="resValue" class="result-val">0.0000</div>
+            </div>
+        </div>
+
+        <div class="card graph-container">
+            <div style="margin-bottom: 10px; font-weight: 600; font-size: 0.875rem; color: #64748b;">函数图像及阴影面积</div>
+            <canvas id="paintCanvas"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // 纯原生数学解析引擎安全包装
+        function parseFormula(expr, x) {
+            // 将常用的快捷数学写法转换为标准的 JavaScript Math 属性
+            let formatted = expr
+                .replace(/sin/g, 'Math.sin')
+                .replace(/cos/g, 'Math.cos')
+                .replace(/tan/g, 'Math.tan')
+                .replace(/exp/g, 'Math.exp')
+                .replace(/pow/g, 'Math.pow')
+                .replace(/PI/g, 'Math.PI')
+                .replace(/E/g, 'Math.E');
+            
+            // 使用 Function 构造器安全执行沙箱计算
+            return new Function('x', `return ${formatted};`)(x);
+        }
+
+        function calculateAndPlot() {
+            const errBanner = document.getElementById('errBanner');
+            errBanner.style.display = 'none';
+
+            const expr = document.getElementById('funcInput').value.trim();
+            const a = parseFloat(document.getElementById('paramA').value);
+            const b = parseFloat(document.getElementById('paramB').value);
+
+            if (!expr) { errBanner.innerText = "请输入函数表达式"; errBanner.style.display = 'block'; return; }
+            if (isNaN(a) || isNaN(b)) { errBanner.innerText = "请输入有效的上下限数字"; errBanner.style.display = 'block'; return; }
+
+            try {
+                // 1. 梯形法数值积分计算
+                const intervals = 1000;
+                const deltaX = (b - a) / intervals;
+                let areaSum = 0.5 * (parseFormula(expr, a) + parseFormula(expr, b));
+
+                for (let i = 1; i < intervals; i++) {
+                    areaSum += parseFormula(expr, a + i * deltaX);
+                }
+                const finalResult = areaSum * deltaX;
+
+                // 更新文本结果
+                document.getElementById('resTitle').innerText = `∫ (${expr}) dx`;
+                document.getElementById('resValue').innerText = isNaN(finalResult) ? "计算错误" : finalResult.toFixed(4);
+
+                // 2. 纯原生 Canvas 渲染逻辑
+                const canvas = document.getElementById('paintCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                // 动态调整 Canvas 像素大小防模糊
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * window.devicePixelRatio;
+                canvas.height = rect.height * window.devicePixelRatio;
+                ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+                const W = rect.width;
+                const H = rect.height;
+
+                // 设定坐标轴视窗范围 (在 [a, b] 基础上左右外延 40% 留白)
+                const marginRatio = 0.4;
+                const span = Math.abs(b - a) || 2;
+                const minX = Math.min(a, b) - span * marginRatio;
+                const maxX = Math.max(a, b) + span * marginRatio;
+
+                // 采样计算 Y 的范围以自适应缩放轴高度
+                let minY = Infinity, maxY = -Infinity;
+                for (let i = 0; i <= 200; i++) {
+                    let curX = minX + (i / 200) * (maxX - minX);
+                    try {
+                        let curY = parseFormula(expr, curX);
+                        if (!isNaN(curY) && isFinite(curY)) {
+                            if (curY < minY) minY = curY;
+                            if (curY > maxY) maxY = curY;
+                        }
+                    } catch(e){}
+                }
+                
+                // 防止极端平直线导致高度塌陷
+                if (minY === maxY) { minY -= 1; maxY += 1; }
+                const yPad = (maxY - minY) * 0.2 || 1;
+                minY -= yPad; maxY += yPad;
+
+                // 映射坐标轴函数
+                const toCtxX = (x) => ((x - minX) / (maxX - minX)) * W;
+                const toCtxY = (y) => H - ((y - minY) / (maxY - minY)) * H;
+
+                // 清空画布
+                ctx.clearRect(0, 0, W, H);
+
+                // 绘制网格基准线 0 轴
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.lineWidth = 1;
+                if (minY <= 0 && maxY >= 0) {
+                    ctx.beginPath(); ctx.moveTo(0, toCtxY(0)); ctx.lineTo(W, toCtxY(0)); ctx.stroke();
+                }
+                if (minX <= 0 && maxX >= 0) {
+                    ctx.beginPath(); ctx.moveTo(toCtxX(0), 0); ctx.lineTo(toCtxX(0), H); ctx.stroke();
+                }
+
+                // 3. 绘制积分阴影区
+                ctx.fillStyle = 'rgba(37, 99, 235, 0.15)';
+                ctx.beginPath();
+                const startX = Math.min(a, b);
+                const endX = Math.max(a, b);
+                
+                ctx.moveTo(toCtxX(startX), toCtxY(0));
+                for (let xVal = startX; xVal <= endX; xVal += (endX - startX) / 100) {
+                    let yVal = parseFormula(expr, xVal);
+                    if (!isNaN(yVal) && isFinite(yVal)) ctx.lineTo(toCtxX(xVal), toCtxY(yVal));
+                }
+                ctx.lineTo(toCtxX(endX), toCtxY(0));
+                ctx.closePath();
+                ctx.fill();
+
+                // 4. 绘制函数主体曲线
+                ctx.strokeStyle = '#2563eb';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                let firstPoint = true;
+
+                for (let i = 0; i <= 300; i++) {
+                    let cx = minX + (i / 300) * (maxX - minX);
+                    let cy = parseFormula(expr, cx);
+                    if (!isNaN(cy) && isFinite(cy)) {
+                        if (firstPoint) {
+                            ctx.moveTo(toCtxX(cx), toCtxY(cy));
+                            firstPoint = false;
+                        } else {
+                            ctx.lineTo(toCtxX(cx), toCtxY(cy));
+                        }
+                    }
+                }
+                ctx.stroke();
+
+                // 5. 绘制边界虚线
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(toCtxX(a), 0); ctx.lineTo(toCtxX(a), H); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(toCtxX(b), 0); ctx.lineTo(toCtxX(b), H); ctx.stroke();
+                ctx.setLineDash([]); // 还原实线
+
+            } catch (err) {
+                errBanner.innerText = "数学语法错误！例如请使用 x * x 代替 x^2，或检查括号。";
+                errBanner.style.display = 'block';
+                document.getElementById('resValue').innerText = "错误";
+            }
+        }
+
+        function loadPreset(func, a, b) {
+            document.getElementById('funcInput').value = func;
+            document.getElementById('paramA').value = a;
+            document.getElementById('paramB').value = b;
+            calculateAndPlot();
+        }
+
+        // 初始化首次自动加载
+        window.onload = function() {
+            calculateAndPlot();
+        };
+    </script>
+</body>
+</html>
